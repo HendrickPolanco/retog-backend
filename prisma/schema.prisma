@@ -1,0 +1,271 @@
+// prisma/schema.prisma
+// Este archivo REEMPLAZA schema.sql
+// Prisma genera el SQL, maneja migraciones y genera el cliente tipado
+//
+// Para aplicar: npx prisma migrate dev --name init
+// Para ver la DB visualmente: npx prisma studio
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // Supabase necesita dos URLs (pooler + direct)
+}
+
+// ── USERS ────────────────────────────────────────────────────
+model User {
+  id           String   @id @default(uuid())
+  username     String   @unique @db.VarChar(30)
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @map("password_hash")
+  fullName     String   @map("full_name") @db.VarChar(100)
+  avatarUrl    String?  @map("avatar_url")
+  bio          String?
+  isPro        Boolean  @default(false) @map("is_pro")
+  totalPoints  Int      @default(0) @map("total_points")
+  streakDays   Int      @default(0) @map("streak_days")
+  lastActive   DateTime? @map("last_active") @db.Date
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  // Relaciones
+  createdChallenges    Challenge[]            @relation("ChallengeCreator")
+  wonChallenges        Challenge[]            @relation("ChallengeWinner")
+  participations       ChallengeParticipant[]
+  progressEntries      ProgressEntry[]
+  votes                Vote[]
+  sentInvitations      DuelInvitation[]       @relation("InvitationSender")
+  receivedInvitations  DuelInvitation[]       @relation("InvitationReceiver")
+  pointsHistory        PointsHistory[]
+  prizesWon            Prize[]                @relation("PrizeWinner")
+  prizesLost           Prize[]                @relation("PrizeLoser")
+  notifications        Notification[]
+  following            Follow[]               @relation("Follower")
+  followers            Follow[]               @relation("Following")
+
+  @@map("users")
+}
+
+// ── CHALLENGES ───────────────────────────────────────────────
+model Challenge {
+  id          String          @id @default(uuid())
+  creatorId   String          @map("creator_id")
+  type        ChallengeType
+  title       String          @db.VarChar(150)
+  description String?
+  category    String?         @db.VarChar(50)
+  startDate   DateTime        @map("start_date") @db.Date
+  endDate     DateTime        @map("end_date") @db.Date
+  rewardText  String?         @map("reward_text")
+  status      ChallengeStatus @default(ACTIVE)
+  isPublic    Boolean         @default(true) @map("is_public")
+  winnerId    String?         @map("winner_id")
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  // Relaciones
+  creator      User                   @relation("ChallengeCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+  winner       User?                  @relation("ChallengeWinner", fields: [winnerId], references: [id])
+  participants ChallengeParticipant[]
+  progress     ProgressEntry[]
+  invitations  DuelInvitation[]
+  prizes       Prize[]
+  pointsEvents PointsHistory[]
+
+  @@map("challenges")
+}
+
+// ── CHALLENGE PARTICIPANTS ───────────────────────────────────
+model ChallengeParticipant {
+  id           String              @id @default(uuid())
+  challengeId  String              @map("challenge_id")
+  userId       String              @map("user_id")
+  role         ParticipantRole     @default(PARTICIPANT)
+  status       ParticipantStatus   @default(ACTIVE)
+  pointsEarned Int                 @default(0) @map("points_earned")
+  joinedAt     DateTime            @default(now()) @map("joined_at")
+
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([challengeId, userId])
+  @@map("challenge_participants")
+}
+
+// ── PROGRESS ENTRIES ─────────────────────────────────────────
+model ProgressEntry {
+  id             String     @id @default(uuid())
+  challengeId    String     @map("challenge_id")
+  userId         String     @map("user_id")
+  note           String?
+  mediaUrl       String?    @map("media_url")
+  mediaType      MediaType? @map("media_type")
+  mediaDuration  Int?       @map("media_duration")  // segundos
+  mediaQuality   String?    @map("media_quality")   // '720p','480p','photo'
+  mediaSizeKb    Int?       @map("media_size_kb")
+  cloudinaryId   String?    @map("cloudinary_id")
+  votesUp        Int        @default(0) @map("votes_up")
+  votesDown      Int        @default(0) @map("votes_down")
+  createdAt      DateTime   @default(now()) @map("created_at")
+
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  votes     Vote[]
+
+  @@map("progress_entries")
+}
+
+// ── VOTES ────────────────────────────────────────────────────
+model Vote {
+  id        String   @id @default(uuid())
+  entryId   String   @map("entry_id")
+  userId    String   @map("user_id")
+  voteType  VoteType @map("vote_type")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  entry ProgressEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  user  User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([entryId, userId]) // Un voto por usuario por entrada
+  @@map("votes")
+}
+
+// ── DUEL INVITATIONS ─────────────────────────────────────────
+model DuelInvitation {
+  id          String           @id @default(uuid())
+  challengeId String           @map("challenge_id")
+  fromUserId  String           @map("from_user_id")
+  toUserId    String           @map("to_user_id")
+  status      InvitationStatus @default(PENDING)
+  createdAt   DateTime         @default(now()) @map("created_at")
+  respondedAt DateTime?        @map("responded_at")
+
+  challenge Challenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  fromUser  User      @relation("InvitationSender", fields: [fromUserId], references: [id])
+  toUser    User      @relation("InvitationReceiver", fields: [toUserId], references: [id])
+
+  @@map("duel_invitations")
+}
+
+// ── POINTS HISTORY ───────────────────────────────────────────
+model PointsHistory {
+  id          String   @id @default(uuid())
+  userId      String   @map("user_id")
+  points      Int
+  reason      String   @db.VarChar(100)
+  challengeId String?  @map("challenge_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge Challenge? @relation(fields: [challengeId], references: [id])
+
+  @@map("points_history")
+}
+
+// ── PRIZES ───────────────────────────────────────────────────
+model Prize {
+  id          String   @id @default(uuid())
+  winnerId    String   @map("winner_id")
+  loserId     String?  @map("loser_id")
+  challengeId String   @map("challenge_id")
+  prizeText   String   @map("prize_text")
+  confirmed   Boolean  @default(false)
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  winner    User      @relation("PrizeWinner", fields: [winnerId], references: [id], onDelete: Cascade)
+  loser     User?     @relation("PrizeLoser", fields: [loserId], references: [id])
+  challenge Challenge @relation(fields: [challengeId], references: [id])
+
+  @@map("prizes")
+}
+
+// ── NOTIFICATIONS ────────────────────────────────────────────
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String   @map("user_id")
+  type      String   @db.VarChar(50)
+  title     String
+  body      String?
+  data      Json?    // { challenge_id, from_username, etc. }
+  isRead    Boolean  @default(false) @map("is_read")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
+}
+
+// ── FOLLOWS ──────────────────────────────────────────────────
+model Follow {
+  followerId  String   @map("follower_id")
+  followingId String   @map("following_id")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  follower  User @relation("Follower", fields: [followerId], references: [id], onDelete: Cascade)
+  following User @relation("Following", fields: [followingId], references: [id], onDelete: Cascade)
+
+  @@id([followerId, followingId])
+  @@map("follows")
+}
+
+// ══════════════════════════════════════════════════════════════
+// ENUMS — Valores fijos que Prisma valida automáticamente
+// ══════════════════════════════════════════════════════════════
+
+enum ChallengeType {
+  INDIVIDUAL
+  DUEL
+
+  @@map("challenge_type")
+}
+
+enum ChallengeStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  CANCELLED
+
+  @@map("challenge_status")
+}
+
+enum ParticipantRole {
+  CREATOR
+  PARTICIPANT
+
+  @@map("participant_role")
+}
+
+enum ParticipantStatus {
+  PENDING
+  ACTIVE
+  SURRENDERED
+  COMPLETED
+
+  @@map("participant_status")
+}
+
+enum MediaType {
+  VIDEO
+  PHOTO
+
+  @@map("media_type")
+}
+
+enum VoteType {
+  UP
+  DOWN
+
+  @@map("vote_type")
+}
+
+enum InvitationStatus {
+  PENDING
+  ACCEPTED
+  REJECTED
+  EXPIRED
+
+  @@map("invitation_status")
+}
