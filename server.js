@@ -13,7 +13,7 @@ const challengeRoutes  = require('./src/routes/challenges');
 const progressRoutes   = require('./src/routes/progress');
 const rankingRoutes    = require('./src/routes/ranking');
 const userRoutes       = require('./src/routes/users');
-
+const paymentRoutes   = require('./src/routes/payments')
 const app = express();
 
 // ── SECURITY MIDDLEWARE ──────────────────────────────────────
@@ -52,8 +52,10 @@ const uploadLimiter = rateLimit({
 });
 
 app.use(generalLimiter);
-
+//--ROUTER PAYMENT-----------
+app.use('/api/payments', paymentRoutes)
 // ── BODY PARSING ─────────────────────────────────────────────
+app.use('/api/payments/webhook', express.raw({ type: 'application/json' }))
 app.use(express.json({ limit: '10kb' }));      // JSON bodies (no para media)
 app.use(express.urlencoded({ extended: true }));
 

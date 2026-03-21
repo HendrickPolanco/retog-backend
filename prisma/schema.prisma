@@ -30,7 +30,7 @@ model User {
   lastActive   DateTime? @map("last_active") @db.Date
   createdAt    DateTime @default(now()) @map("created_at")
   updatedAt    DateTime @updatedAt @map("updated_at")
-
+  stripeCustomerId String? @map("stripe_customer_id")
   // Relaciones
   createdChallenges    Challenge[]            @relation("ChallengeCreator")
   wonChallenges        Challenge[]            @relation("ChallengeWinner")
