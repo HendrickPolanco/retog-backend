@@ -12,8 +12,7 @@ const { authenticate } = require('../middleware/auth')
 const router = express.Router()
 
 const PRICE_ID = process.env.STRIPE_PRICE_ID
-const FRONTEND_URL = process.env.ALLOWED_ORIGIN || 'http://localhost:5173'
-
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173'
 // ── GET /api/payments/status ─────────────────────────────────
 // Ver si el usuario actual es Pro
 router.get('/status', authenticate, async (req, res) => {
