@@ -90,7 +90,8 @@ router.post('/portal', authenticate, async (req, res) => {
     if (!user.stripeCustomerId) {
       return res.status(400).json({ error: 'No tienes una suscripción activa' })
     }
-
+    console.log('FRONTEND_URL:', FRONTEND_URL)
+    console.log('success_url:', `${FRONTEND_URL}/pro-success`)
     const session = await stripe.billingPortal.sessions.create({
       customer:   user.stripeCustomerId,
       return_url: `${FRONTEND_URL}/perfil`,
