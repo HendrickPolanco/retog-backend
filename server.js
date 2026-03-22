@@ -24,11 +24,12 @@ app.use(helmet());  // Headers de seguridad automáticos
 
 // CORS: solo tu dominio puede usar la API
 app.use(cors({
-  origin: [
-    process.env.ALLOWED_ORIGIN,
-    'http://localhost:5173',
-    'http://localhost:5176',
-    'https://retog.vercel.app'].filter(Boolean),
+  origin: process.env.ALLOWED_ORIGIN || 'http://localhost:5173',
+  // origin: [
+  //   process.env.ALLOWED_ORIGIN,
+  //   'http://localhost:5173',
+  //   'http://localhost:5176',
+  //   'https://retog.vercel.app'].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
