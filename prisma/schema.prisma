@@ -25,6 +25,8 @@ model User {
   avatarUrl    String?  @map("avatar_url")
   bio          String?
   isPro        Boolean  @default(false) @map("is_pro")
+  subscriptionEndsAt   DateTime? @map("subscription_ends_at")
+  isAdmin      Boolean  @default(false) @map("is_admin")
   totalPoints  Int      @default(0) @map("total_points")
   streakDays   Int      @default(0) @map("streak_days")
   lastActive   DateTime? @map("last_active") @db.Date

@@ -3,10 +3,14 @@ const express = require('express');
 const { body, validationResult } = require('express-validator');
 const prisma = require('../config/prisma');
 const { authenticate } = require('../middleware/auth');
+const {
+  sendChallengeCompletedEmail,
+  sendDuelWonEmail,
+  sendDuelAcceptedEmail,
+} = require('../services/email');
 
 const router = express.Router();
 
-// ── POINTS CONFIG ─────────────────────────────────────────────
 const POINTS = {
   COMPLETE_INDIVIDUAL: 100,
   WIN_DUEL:            200,
@@ -17,23 +21,19 @@ const POINTS = {
   STREAK_30:           200,
 };
 
-// ── HELPER: Sumar puntos + actualizar total en una transacción ─
 const awardPoints = async (tx, userId, points, reason, challengeId = null) => {
-  // Crear registro en historial
   await tx.pointsHistory.create({
     data: { userId, points, reason, challengeId },
   });
-  // Actualizar total del usuario
   await tx.user.update({
     where: { id: userId },
     data: { totalPoints: { increment: points } },
   });
 };
 
-// ── GET /api/challenges — Feed público ───────────────────────
+// ── GET /api/challenges ───────────────────────────────────────
 router.get('/', authenticate, async (req, res) => {
   const { page = 1, limit = 20, type, category } = req.query;
-
   try {
     const challenges = await prisma.challenge.findMany({
       where: {
@@ -46,23 +46,20 @@ router.get('/', authenticate, async (req, res) => {
         creator: {
           select: { id: true, username: true, fullName: true, avatarUrl: true },
         },
-        _count: {
-          select: { participants: true, progress: true },
-        },
+        _count: { select: { participants: true, progress: true } },
       },
       orderBy: { createdAt: 'desc' },
       skip:  (parseInt(page) - 1) * parseInt(limit),
       take:  parseInt(limit),
     });
-
     res.json({ challenges, page: parseInt(page), limit: parseInt(limit) });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Error cargando feed' });
+    res.status(500).json({ error: 'Error loading feed' });
   }
 });
 
-// ── GET /api/challenges/mine ─────────────────────────────────
+// ── GET /api/challenges/mine ──────────────────────────────────
 router.get('/mine', authenticate, async (req, res) => {
   try {
     const participations = await prisma.challengeParticipant.findMany({
@@ -73,7 +70,6 @@ router.get('/mine', authenticate, async (req, res) => {
             creator: {
               select: { id: true, username: true, fullName: true, avatarUrl: true },
             },
-            // Traer los otros participantes (rival en duelos)
             participants: {
               where: { userId: { not: req.user.id } },
               include: {
@@ -89,7 +85,6 @@ router.get('/mine', authenticate, async (req, res) => {
       orderBy: { joinedAt: 'desc' },
     });
 
-    // Agrupar por tipo
     const challenges = participations.map(p => ({
       ...p.challenge,
       myRole:   p.role,
@@ -98,20 +93,20 @@ router.get('/mine', authenticate, async (req, res) => {
     }));
 
     const grouped = {
-      activos:     challenges.filter(c => c.status === 'ACTIVE' && c.type === 'INDIVIDUAL'),
-      duelos:      challenges.filter(c => c.status === 'ACTIVE' && c.type === 'DUEL'),
-      ganados:     challenges.filter(c => c.winnerId === req.user.id),
-      completados: challenges.filter(c => c.status === 'COMPLETED' && c.winnerId !== req.user.id),
+      active:     challenges.filter(c => c.status === 'ACTIVE' && c.type === 'INDIVIDUAL'),
+      duels:      challenges.filter(c => c.status === 'ACTIVE' && c.type === 'DUEL'),
+      won:        challenges.filter(c => c.winnerId === req.user.id),
+      completed:  challenges.filter(c => c.status === 'COMPLETED' && c.winnerId !== req.user.id),
     };
 
     res.json({ challenges, grouped });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Error cargando mis retos' });
+    res.status(500).json({ error: 'Error loading my challenges' });
   }
 });
 
-// ── GET invitations /api/challenges ─────────────────────────────────────
+// ── GET /api/challenges/invitations ──────────────────────────
 router.get('/invitations', authenticate, async (req, res) => {
   try {
     const invitations = await prisma.duelInvitation.findMany({
@@ -120,20 +115,20 @@ router.get('/invitations', authenticate, async (req, res) => {
         challenge: {
           include: {
             creator: {
-              select: { id:true, username:true, fullName:true, avatarUrl:true }
-            }
-          }
-        }
+              select: { id: true, username: true, fullName: true, avatarUrl: true },
+            },
+          },
+        },
       },
-      orderBy: { createdAt: 'desc' }
-    })
-    res.json({ invitations })
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json({ invitations });
   } catch (err) {
-    res.status(500).json({ error: 'Error cargando invitaciones' })
+    res.status(500).json({ error: 'Error loading invitations' });
   }
-})
+});
 
-// ── GET /api/challenges/:id ──────────────────────────────────
+// ── GET /api/challenges/:id ───────────────────────────────────
 router.get('/:id', authenticate, async (req, res) => {
   try {
     const challenge = await prisma.challenge.findUnique({
@@ -157,7 +152,6 @@ router.get('/:id', authenticate, async (req, res) => {
             user: {
               select: { id: true, username: true, fullName: true, avatarUrl: true },
             },
-            // Solo traer el voto del usuario actual
             votes: {
               where: { userId: req.user.id },
               select: { voteType: true },
@@ -169,26 +163,23 @@ router.get('/:id', authenticate, async (req, res) => {
     });
 
     if (!challenge) {
-      return res.status(404).json({ error: 'Reto no encontrado' });
+      return res.status(404).json({ error: 'Challenge not found' });
     }
 
-    // Formatear timeline con myVote
     const timeline = challenge.progress.map(entry => ({
       ...entry,
       myVote: entry.votes[0]?.voteType || null,
-      votes:  undefined, // no exponer la lista completa de votos
+      votes:  undefined,
     }));
-    console.log('Timeline entries:', timeline.length) // ← agrega esto
 
     res.json({ challenge: { ...challenge, progress: undefined }, timeline });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Error cargando reto' });
+    res.status(500).json({ error: 'Error loading challenge' });
   }
 });
 
-
-// ── POST /api/challenges ─────────────────────────────────────
+// ── POST /api/challenges ──────────────────────────────────────
 router.post('/',
   authenticate,
   [
@@ -200,7 +191,11 @@ router.post('/',
   ],
   async (req, res) => {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+    if (!errors.isEmpty()) {
+      console.log('❌ Validation errors:', JSON.stringify(errors.array(), null, 2));
+      console.log('📦 Body:', JSON.stringify(req.body, null, 2));
+      return res.status(400).json({ errors: errors.array() });
+    }
 
     const {
       title, description, type, category,
@@ -209,14 +204,11 @@ router.post('/',
     } = req.body;
 
     if (new Date(endDate) <= new Date(startDate)) {
-      return res.status(400).json({ error: 'La fecha fin debe ser mayor al inicio' });
+      return res.status(400).json({ error: 'End date must be after start date' });
     }
 
     try {
-      // Prisma transaction — todo o nada
       const result = await prisma.$transaction(async (tx) => {
-
-        // Crear reto
         const challenge = await tx.challenge.create({
           data: {
             creatorId:   req.user.id,
@@ -231,7 +223,6 @@ router.post('/',
           },
         });
 
-        // Agregar al creador como participante
         await tx.challengeParticipant.create({
           data: {
             challengeId: challenge.id,
@@ -241,7 +232,6 @@ router.post('/',
           },
         });
 
-        // Si es duelo: buscar rival y crear invitación
         let invitation = null;
         if (type === 'duel' && rivalUsername) {
           const rival = await tx.user.findUnique({
@@ -249,12 +239,8 @@ router.post('/',
             select: { id: true, username: true },
           });
 
-          if (!rival) {
-            throw new Error(`Usuario @${rivalUsername} no encontrado`);
-          }
-          if (rival.id === req.user.id) {
-            throw new Error('No puedes retarte a ti mismo');
-          }
+          if (!rival) throw new Error(`User @${rivalUsername} not found`);
+          if (rival.id === req.user.id) throw new Error('You cannot challenge yourself');
 
           invitation = await tx.duelInvitation.create({
             data: {
@@ -264,13 +250,12 @@ router.post('/',
             },
           });
 
-          // Notificación al rival
           await tx.notification.create({
             data: {
               userId: rival.id,
               type:   'duel_invite',
-              title:  `⚔️ @${req.user.username} te retó!`,
-              body:   `"${title}" — Recompensa: ${rewardText || 'honor'}`,
+              title:  `⚔️ @${req.user.username} challenged you!`,
+              body:   `"${title}" — Reward: ${rewardText || 'honor'}`,
               data:   { challenge_id: challenge.id, from_username: req.user.username },
             },
           });
@@ -281,23 +266,25 @@ router.post('/',
 
       res.status(201).json({
         message: type === 'duel'
-          ? `⚔️ Duelo creado! Invitación enviada a @${rivalUsername}`
-          : '🎯 Reto creado! Empieza a demostrar.',
+          ? `⚔️ Duel created! Invitation sent to @${rivalUsername}`
+          : '🎯 Challenge created! Time to prove yourself.',
         ...result,
       });
     } catch (err) {
-      if (err.message.includes('no encontrado') || err.message.includes('ti mismo')) {
+      if (err.message.includes('not found') || err.message.includes('yourself')) {
         return res.status(400).json({ error: err.message });
       }
       console.error(err);
-      res.status(500).json({ error: 'Error creando reto' });
+      res.status(500).json({ error: 'Error creating challenge' });
     }
   }
 );
 
-// ── POST /api/challenges/:id/accept ─────────────────────────
+// ── POST /api/challenges/:id/accept ──────────────────────────
 router.post('/:id/accept', authenticate, async (req, res) => {
   try {
+    let creatorEmail, creatorUsername, challengeTitle, rivalUsername;
+
     await prisma.$transaction(async (tx) => {
       const invitation = await tx.duelInvitation.findFirst({
         where: {
@@ -307,15 +294,13 @@ router.post('/:id/accept', authenticate, async (req, res) => {
         },
       });
 
-      if (!invitation) throw new Error('No tienes una invitación pendiente para este reto');
+      if (!invitation) throw new Error('You have no pending invitation for this challenge');
 
-      // Aceptar invitación
       await tx.duelInvitation.update({
         where: { id: invitation.id },
         data: { status: 'ACCEPTED', respondedAt: new Date() },
       });
 
-      // Agregar al rival como participante
       await tx.challengeParticipant.upsert({
         where: {
           challengeId_userId: { challengeId: req.params.id, userId: req.user.id },
@@ -329,37 +314,50 @@ router.post('/:id/accept', authenticate, async (req, res) => {
         update: { status: 'ACTIVE' },
       });
 
-      // Activar reto
       const challenge = await tx.challenge.update({
         where: { id: req.params.id },
         data:  { status: 'ACTIVE' },
-        select: { creatorId: true, title: true },
+        include: {
+          creator: { select: { email: true, username: true } },
+        },
       });
 
-      // Notificar al creador
       await tx.notification.create({
         data: {
           userId: challenge.creatorId,
           type:   'duel_accepted',
-          title:  `⚔️ @${req.user.username} aceptó tu reto!`,
-          body:   `"${challenge.title}" — El duelo ha comenzado 🔥`,
+          title:  `⚔️ @${req.user.username} accepted your challenge!`,
+          body:   `"${challenge.title}" — The duel has begun 🔥`,
           data:   { challenge_id: req.params.id },
         },
       });
+
+      creatorEmail    = challenge.creator.email;
+      creatorUsername = challenge.creator.username;
+      challengeTitle  = challenge.title;
+      rivalUsername   = req.user.username;
     });
 
-    res.json({ message: '⚔️ Duelo aceptado! Que empiece la competencia 🔥' });
+    await sendDuelAcceptedEmail(
+      { email: creatorEmail, username: creatorUsername },
+      { username: rivalUsername },
+      { title: challengeTitle }
+    ).catch(err => console.error('Email error (duel accepted):', err));
+
+    res.json({ message: '⚔️ Duel accepted! Let the competition begin 🔥' });
   } catch (err) {
-    if (err.message.includes('invitación')) {
+    if (err.message.includes('invitation')) {
       return res.status(400).json({ error: err.message });
     }
-    res.status(500).json({ error: 'Error aceptando duelo' });
+    res.status(500).json({ error: 'Error accepting duel' });
   }
 });
 
-// ── POST /api/challenges/:id/surrender ──────────────────────
+// ── POST /api/challenges/:id/surrender ───────────────────────
 router.post('/:id/surrender', authenticate, async (req, res) => {
   try {
+    let winnerEmail, winnerUsername, loserUsername, challengeTitle, pointsEarned;
+
     await prisma.$transaction(async (tx) => {
       const myParticipation = await tx.challengeParticipant.findUnique({
         where: {
@@ -369,72 +367,87 @@ router.post('/:id/surrender', authenticate, async (req, res) => {
       });
 
       if (!myParticipation || myParticipation.status !== 'ACTIVE') {
-        throw new Error('No estás participando en este reto');
+        throw new Error('You are not participating in this challenge');
       }
 
-      // Marcar rendición
       await tx.challengeParticipant.update({
         where: { challengeId_userId: { challengeId: req.params.id, userId: req.user.id } },
         data:  { status: 'SURRENDERED' },
       });
 
-      // Si es duelo: el rival gana automáticamente
       if (myParticipation.challenge.type === 'DUEL') {
         const rivalParticipation = await tx.challengeParticipant.findFirst({
           where: {
             challengeId: req.params.id,
             userId:      { not: req.user.id },
           },
-          select: { userId: true },
+          include: {
+            user: { select: { id: true, email: true, username: true } },
+          },
         });
 
         if (rivalParticipation) {
-          const winnerId = rivalParticipation.userId;
+          const winner   = rivalParticipation.user;
+          pointsEarned   = POINTS.RIVAL_SURRENDERS;
+          challengeTitle = myParticipation.challenge.title;
 
           await tx.challenge.update({
             where: { id: req.params.id },
-            data:  { status: 'COMPLETED', winnerId },
+            data:  { status: 'COMPLETED', winnerId: winner.id },
           });
 
-          await awardPoints(tx, winnerId, POINTS.RIVAL_SURRENDERS, 'rival_surrenders', req.params.id);
+          await awardPoints(tx, winner.id, pointsEarned, 'rival_surrenders', req.params.id);
 
           await tx.notification.create({
             data: {
-              userId: winnerId,
+              userId: winner.id,
               type:   'duel_won',
-              title:  '🏆 ¡Ganaste el duelo!',
-              body:   `@${req.user.username} se rindió. +${POINTS.RIVAL_SURRENDERS} puntos`,
+              title:  '🏆 You won the duel!',
+              body:   `@${req.user.username} surrendered. +${pointsEarned} points`,
               data:   { challenge_id: req.params.id },
             },
           });
 
-          // Registrar premio si hay recompensa
           if (myParticipation.challenge.rewardText) {
             await tx.prize.create({
               data: {
-                winnerId,
+                winnerId:    winner.id,
                 loserId:     req.user.id,
                 challengeId: req.params.id,
                 prizeText:   myParticipation.challenge.rewardText,
               },
             });
           }
+
+          winnerEmail    = winner.email;
+          winnerUsername = winner.username;
+          loserUsername  = req.user.username;
         }
       }
     });
 
-    res.json({ message: 'Te has rendido. No pasa nada, el próximo lo ganas 💪' });
+    if (winnerEmail) {
+      await sendDuelWonEmail(
+        { email: winnerEmail, username: winnerUsername },
+        { username: loserUsername },
+        { title: challengeTitle, points: pointsEarned }
+      ).catch(err => console.error('Email error (duel won):', err));
+    }
+
+    res.json({ message: "You surrendered. Keep going, you'll win the next one 💪" });
   } catch (err) {
-    if (err.message.includes('participando')) {
+    if (err.message.includes('participating')) {
       return res.status(400).json({ error: err.message });
     }
-    res.status(500).json({ error: 'Error procesando rendición' });
+    res.status(500).json({ error: 'Error processing surrender' });
   }
 });
 
-// ── POST /api/challenges/:id/complete ───────────────────────
+// ── POST /api/challenges/:id/complete ────────────────────────
 router.post('/:id/complete', authenticate, async (req, res) => {
   try {
+    let challengeTitle;
+
     await prisma.$transaction(async (tx) => {
       const challenge = await tx.challenge.findFirst({
         where: {
@@ -445,7 +458,7 @@ router.post('/:id/complete', authenticate, async (req, res) => {
         },
       });
 
-      if (!challenge) throw new Error('Reto no encontrado o no tienes permiso');
+      if (!challenge) throw new Error('Challenge not found or you do not have permission');
 
       await tx.challenge.update({
         where: { id: req.params.id },
@@ -453,15 +466,22 @@ router.post('/:id/complete', authenticate, async (req, res) => {
       });
 
       await awardPoints(tx, req.user.id, POINTS.COMPLETE_INDIVIDUAL, 'complete_individual', req.params.id);
+
+      challengeTitle = challenge.title;
     });
 
+    await sendChallengeCompletedEmail(
+      { email: req.user.email, username: req.user.username },
+      { title: challengeTitle, points: POINTS.COMPLETE_INDIVIDUAL }
+    ).catch(err => console.error('Email error (challenge completed):', err));
+
     res.json({
-      message: `🎯 ¡Reto completado! +${POINTS.COMPLETE_INDIVIDUAL} puntos`,
+      message: `🎯 Challenge completed! +${POINTS.COMPLETE_INDIVIDUAL} points`,
       pointsEarned: POINTS.COMPLETE_INDIVIDUAL,
     });
   } catch (err) {
-    if (err.message.includes('permiso')) return res.status(403).json({ error: err.message });
-    res.status(500).json({ error: 'Error completando reto' });
+    if (err.message.includes('permission')) return res.status(403).json({ error: err.message });
+    res.status(500).json({ error: 'Error completing challenge' });
   }
 });
 

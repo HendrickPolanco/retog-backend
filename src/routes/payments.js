@@ -8,6 +8,7 @@ const express = require('express')
 const stripe  = require('stripe')(process.env.STRIPE_SECRET_KEY)
 const prisma  = require('../config/prisma')
 const { authenticate } = require('../middleware/auth')
+const { sendMembershipActivatedEmail } = require('../services/email')
 
 const router = express.Router()
 
@@ -134,14 +135,24 @@ router.post('/webhook',
           if (!userId) break
 
           const isActive = sub.status === 'active' || sub.status === 'trialing'
-          await prisma.user.update({
+          const user = await prisma.user.update({
             where: { id: userId },
-            data:  { isPro: isActive },
-          })
-          console.log(`✅ Usuario ${userId} Pro: ${isActive}`)
-          break
-        }
+            data:  { isPro: isActive
+              ? new Date(sub.current_period_end * 1000) // ← Stripe usa Unix timestamp
+              : null,
 
+            },
+            select: { email: true, username: true }, // ← get email for notification
+          })
+          if (isActive && event.type === 'customer.subscription.created') {
+            await sendMembershipActivatedEmail(user, 'Pro').catch(
+              err => console.error('Email error (membership activated):', err)
+            )
+         
+        }
+        console.log(`✅ Usuario ${userId} Pro: ${isActive}`)
+        break
+      }
         // Suscripción cancelada
         case 'customer.subscription.deleted': {
           const sub    = event.data.object

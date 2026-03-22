@@ -5,6 +5,7 @@ const jwt     = require('jsonwebtoken');
 const { body, validationResult } = require('express-validator');
 const prisma  = require('../config/prisma');
 const { authenticate } = require('../middleware/auth');
+const { sendWelcomeEmail } = require('../services/email'); 
 
 const router = express.Router();
 
@@ -29,8 +30,12 @@ const registerRules = [
 // ── POST /api/auth/register ──────────────────────────────────
 router.post('/register', registerRules, async (req, res) => {
   const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
+  // if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+  if (!errors.isEmpty()) {
+    console.log('❌ Validation errors:', JSON.stringify(errors.array(), null, 2));
+    console.log('📦 Body:', JSON.stringify(req.body, null, 2));
+    return res.status(400).json({ errors: errors.array() });
+  }
   const { username, email, password, fullName } = req.body;
 
   try {
@@ -66,9 +71,12 @@ router.post('/register', registerRules, async (req, res) => {
         fullName: true, isPro: true, totalPoints: true,
       },
     });
+      // ✉️ Send welcome email (don't await — don't block the response)
+      sendWelcomeEmail(user).catch(err => console.error('Welcome email error:', err));
+
 
     res.status(201).json({
-      message: '¡Bienvenido a RETO.GG! 🔥',
+      message: '¡Welcome to RETO.GG! 🔥',
       token: signToken(user.id),
       user,
     });
@@ -122,6 +130,7 @@ router.post('/login',
           fullName:    user.fullName,
           avatarUrl:   user.avatarUrl,
           isPro:       user.isPro,
+          isAdmin: user.isAdmin,
           totalPoints: user.totalPoints,
           streakDays:  user.streakDays,
         },

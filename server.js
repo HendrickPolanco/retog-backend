@@ -14,6 +14,9 @@ const progressRoutes   = require('./src/routes/progress');
 const rankingRoutes    = require('./src/routes/ranking');
 const userRoutes       = require('./src/routes/users');
 const paymentRoutes   = require('./src/routes/payments')
+const adminRoutes = require('./src/routes/admin');
+const { startCronJobs } = require('./src/services/cron')
+
 const app = express();
 
 // ── SECURITY MIDDLEWARE ──────────────────────────────────────
@@ -21,7 +24,11 @@ app.use(helmet());  // Headers de seguridad automáticos
 
 // CORS: solo tu dominio puede usar la API
 app.use(cors({
-  origin: process.env.ALLOWED_ORIGIN || 'http://localhost:5173',
+  origin: [
+    process.env.ALLOWED_ORIGIN,
+    'http://localhost:5173',
+    'http://localhost:5176',
+    'https://retog.vercel.app'].filter(Boolean),
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
@@ -52,6 +59,9 @@ const uploadLimiter = rateLimit({
 });
 
 app.use(generalLimiter);
+//--admin 
+// En los imports de routes
+app.use('/api/admin', adminRoutes);
 //--ROUTER PAYMENT-----------
 app.use('/api/payments', paymentRoutes)
 // ── BODY PARSING ─────────────────────────────────────────────
@@ -107,6 +117,8 @@ app.listen(PORT, () => {
   💚 Health: http://localhost:${PORT}/health
   📦 Entorno: ${process.env.NODE_ENV || 'development'}
   `);
+  startCronJobs()
+
 });
 
 module.exports = app;
