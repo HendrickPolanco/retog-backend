@@ -2,19 +2,17 @@
 const { Resend } = require('resend');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
-const FROM   = 'onboarding@resend.dev'; // change to noreply@retog.gg when you have a domain
+const FROM   = 'noreply@retogg.com'; // ✅ dominio verificado
 
 const sendWelcomeEmail = async (user) => {
-    // console.log('📧 Sending welcome email to:', user.email);
-    await resend.emails.send({
+  await resend.emails.send({
     from:    FROM,
-    to:    'hendrickpolanco2003@gmail.com'  ,
-    // user.email
+    to:      user.email,
     subject: 'Welcome to RETO.GG! 🎮',
     html: `
       <h1>Hey ${user.username}!</h1>
       <p>You're officially part of RETO.GG. Start accepting challenges and climb the leaderboard.</p>
-      <a href="https://retog.gg" style="background:#6366f1;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;">
+      <a href="https://retogg.com" style="background:#6366f1;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;">
         Go to RETO.GG
       </a>
     `,
@@ -24,8 +22,7 @@ const sendWelcomeEmail = async (user) => {
 const sendChallengeCompletedEmail = async (user, challenge) => {
   await resend.emails.send({
     from:    FROM,
-    to: 'hendrickpolanco2003@gmail.com'  ,
-    // user.email
+    to:      user.email,
     subject: `You completed "${challenge.title}"! 🏆`,
     html: `
       <h1>Well done, ${user.username}!</h1>
@@ -36,11 +33,9 @@ const sendChallengeCompletedEmail = async (user, challenge) => {
 };
 
 const sendDuelWonEmail = async (winner, loser, challenge) => {
-    // console.log('📧 Sending won email to:', user.email);
-    await resend.emails.send({
+  await resend.emails.send({
     from:    FROM,
-    to:  'hendrickpolanco2003@gmail.com'  ,
-    //    winner.email,
+    to:      winner.email,
     subject: `You won the duel! ⚔️🏆`,
     html: `
       <h1>Victory, ${winner.username}!</h1>
@@ -51,12 +46,9 @@ const sendDuelWonEmail = async (winner, loser, challenge) => {
 };
 
 const sendDuelAcceptedEmail = async (creator, rival, challenge) => {
-    // console.log('📧 Sending  duel accepted email to:', user.email);
-
-    await resend.emails.send({
+  await resend.emails.send({
     from:    FROM,
-    to:       'hendrickpolanco2003@gmail.com'  ,
-    // creator.email,
+    to:      creator.email,
     subject: `@${rival.username} accepted your duel! ⚔️`,
     html: `
       <h1>The duel has begun, ${creator.username}!</h1>
@@ -88,7 +80,7 @@ const sendMembershipExpiringEmail = async (user, daysLeft) => {
       <h1>Hey ${user.username},</h1>
       <p>Your membership expires in <strong>${daysLeft} days</strong>.</p>
       <p>Renew it to keep access to all exclusive challenges.</p>
-      <a href="https://retog.gg/pricing" style="background:#6366f1;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;">
+      <a href="https://retogg.com/pricing" style="background:#6366f1;color:white;padding:12px 24px;border-radius:8px;text-decoration:none;">
         Renew membership
       </a>
     `,
